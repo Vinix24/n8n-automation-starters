@@ -1,0 +1,305 @@
+{
+  "name": "13 — Healthcheck Channels",
+  "active": true,
+  "nodes": [
+    {
+      "id": "hc-0013-0001-0001-0001-000000000001",
+      "name": "Cron: every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000002",
+      "name": "Check Supabase Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 120],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/monitoring_keywords?limit=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000003",
+      "name": "Normalize Supabase",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 120],
+      "parameters": {
+        "jsCode": "const j = $json;\nconst failed = j.error !== undefined;\nconst statusOk = j.statusCode === 200;\nconst ok = !failed && statusOk;\nconst detail = failed\n  ? (j.error?.description || j.error?.message || 'connection failed')\n  : (statusOk ? `HTTP ${j.statusCode} ok` : `HTTP ${j.statusCode} unexpected`);\nreturn [{ json: { component: 'supabase', ok, detail } }];"
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000004",
+      "name": "Check Mac Wrapper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.LOCAL_CLAUDE_WRAPPER_URL || 'http://<YOUR_TAILSCALE_MACBOOK_IP>:8765') + '/health' }}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000005",
+      "name": "Normalize Mac Wrapper",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300],
+      "parameters": {
+        "jsCode": "const j = $json;\nconst failed = j.error !== undefined;\nconst statusOk = j.statusCode === 200;\nconst apiKeyOk = j.body && j.body.api_key_configured === true;\nconst ok = !failed && statusOk && apiKeyOk;\nconst detail = failed\n  ? (j.error?.description || j.error?.message || 'connection failed')\n  : (!statusOk ? `HTTP ${j.statusCode}` : (!apiKeyOk ? `api_key_configured=${j.body?.api_key_configured}` : 'HTTP 200 ok'));\nreturn [{ json: { component: 'mac-wrapper', ok, detail } }];"
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000006",
+      "name": "Check n8n Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 480],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:5678/healthz",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000007",
+      "name": "Normalize n8n Health",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 480],
+      "parameters": {
+        "jsCode": "const j = $json;\nconst failed = j.error !== undefined;\nconst statusOk = j.statusCode === 200;\nconst ok = !failed && statusOk;\nconst detail = failed\n  ? (j.error?.description || j.error?.message || 'connection failed')\n  : (statusOk ? 'HTTP 200 ok' : `HTTP ${j.statusCode}`);\nreturn [{ json: { component: 'n8n', ok, detail } }];"
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000008",
+      "name": "Merge Checks",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [960, 300],
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000009",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all().map(i => i.json);\nconst failed = items.filter(i => !i.ok);\nconst ts = new Date().toISOString();\nreturn [{\n  json: {\n    any_failed: failed.length > 0,\n    failed_components: failed.map(i => i.component),\n    all_components: items,\n    check_timestamp: ts,\n  }\n}];"
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000010",
+      "name": "Any Failures?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1440, 300],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-any-failed",
+              "leftValue": "={{ $json.any_failed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000011",
+      "name": "No-op: All Healthy",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1680, 420],
+      "parameters": {}
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000012",
+      "name": "Log to system.events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 180],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept-Profile", "value": "system" },
+            { "name": "Content-Profile", "value": "system" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={\n  \"event_type\": \"healthcheck\",\n  \"source\": \"n8n\",\n  \"severity\": \"error\",\n  \"payload\": {{ JSON.stringify({ failed_components: $json.failed_components, all_components: $json.all_components, check_timestamp: $json.check_timestamp }) }}\n}",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "hc-0013-0001-0001-0001-000000000013",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1920, 180],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🚨 Healthcheck: {{ $('Aggregate Results').item.json.failed_components.join(', ') }} DOWN",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credential",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cron: every 15 minutes": {
+      "main": [
+        [
+          { "node": "Check Supabase Read", "type": "main", "index": 0 },
+          { "node": "Check Mac Wrapper", "type": "main", "index": 0 },
+          { "node": "Check n8n Health", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Check Supabase Read": {
+      "main": [
+        [{ "node": "Normalize Supabase", "type": "main", "index": 0 }]
+      ]
+    },
+    "Normalize Supabase": {
+      "main": [
+        [{ "node": "Merge Checks", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Mac Wrapper": {
+      "main": [
+        [{ "node": "Normalize Mac Wrapper", "type": "main", "index": 0 }]
+      ]
+    },
+    "Normalize Mac Wrapper": {
+      "main": [
+        [{ "node": "Merge Checks", "type": "main", "index": 1 }]
+      ]
+    },
+    "Check n8n Health": {
+      "main": [
+        [{ "node": "Normalize n8n Health", "type": "main", "index": 0 }]
+      ]
+    },
+    "Normalize n8n Health": {
+      "main": [
+        [{ "node": "Merge Checks", "type": "main", "index": 2 }]
+      ]
+    },
+    "Merge Checks": {
+      "main": [
+        [{ "node": "Aggregate Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [{ "node": "Any Failures?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Any Failures?": {
+      "main": [
+        [{ "node": "Log to system.events", "type": "main", "index": 0 }],
+        [{ "node": "No-op: All Healthy", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log to system.events": {
+      "main": [
+        [{ "node": "Send Telegram Alert", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "automation-starter" },
+    { "name": "healthcheck" },
+    { "name": "f51-pr6" }
+  ],
+  "pinData": {},
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "n8n"
+  }
+}

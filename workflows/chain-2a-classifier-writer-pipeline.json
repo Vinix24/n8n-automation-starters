@@ -1,0 +1,538 @@
+{
+  "name": "Chain 2a — Classifier→Writer Pipeline",
+  "nodes": [
+    {
+      "id": "c2a-0001-0001-0001-000000000001",
+      "name": "Webhook URL Paste",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 360],
+      "parameters": {
+        "path": "url-paste",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000002",
+      "name": "Validate API Key",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 360],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-mc-apikey",
+              "leftValue": "={{ $json.headers['x-mc-api-key'] }}",
+              "rightValue": "={{ $env.MC_API_KEY }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000003",
+      "name": "Respond 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [720, 540],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 401,
+        "responseBody": "={{ JSON.stringify({ error: 'Unauthorized' }) }}"
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000004",
+      "name": "Extract Request Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [720, 360],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-url",
+              "name": "url",
+              "value": "={{ $json.body.url }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-source",
+              "name": "source",
+              "value": "={{ $json.body.source || 'url-paste' }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-correlation",
+              "name": "correlation_id",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000005",
+      "name": "Apify Cost Pre-flight",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [960, 360],
+      "parameters": {
+        "command": "=# TODO: roep hier je eigen Apify-cost pre-flight check aan — moet op stdout JSON printen met keys projected_eur, limit_eur, within_budget"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000006",
+      "name": "Parse Cost Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 360],
+      "parameters": {
+        "jsCode": "const stdout = ($json.stdout || '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(stdout);\n} catch (err) {\n  throw new Error('Cost pre-flight produced unparseable output: ' + stdout);\n}\nif (!parsed.within_budget) {\n  throw new Error(`Apify cost €${parsed.projected_eur.toFixed(4)} exceeds limit €${parsed.limit_eur.toFixed(2)}`);\n}\nconst ctx = $('Extract Request Context').item.json;\nreturn [{ json: { ...ctx, projected_eur: parsed.projected_eur, limit_eur: parsed.limit_eur } }];"
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000007",
+      "name": "Run Ingester",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1440, 360],
+      "parameters": {
+        "command": "=# TODO: roep hier je eigen post-ingester aan — inputs beschikbaar via $json.url en $json.source; moet op stdout JSON printen met keys captured_post_id, url, already_existed, workflow_state"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000008",
+      "name": "Parse Ingester Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 360],
+      "parameters": {
+        "jsCode": "const stdout = ($json.stdout || '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(stdout);\n} catch (err) {\n  throw new Error('Ingester produced unparseable output: ' + stdout);\n}\nif (!parsed.captured_post_id) {\n  throw new Error('Ingester did not return captured_post_id');\n}\nconst ctx = $('Extract Request Context').item.json;\nreturn [{ json: { ...ctx, captured_post_id: parsed.captured_post_id, already_existed: parsed.already_existed } }];"
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000008b",
+      "name": "Check Author Cooldown",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1920, 360],
+      "parameters": {
+        "command": "=# TODO: roep hier je eigen auteur-cooldown-check aan — input via $json.captured_post_id; moet op stdout JSON printen met keys in_cooldown, author_url"
+      },
+      "retryOnFail": false,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000008c",
+      "name": "Parse Cooldown Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 360],
+      "parameters": {
+        "jsCode": "const stdout = ($json.stdout || '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(stdout);\n} catch (err) {\n  // If cooldown check fails, default to not-in-cooldown (fail open)\n  parsed = { in_cooldown: false, author_url: '' };\n}\nconst ctx = $('Parse Ingester Output').item.json;\nreturn [{ json: { ...ctx, in_cooldown: parsed.in_cooldown, author_url: parsed.author_url } }];"
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000008d",
+      "name": "Author Cooldown Branch",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2400, 360],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-cooldown",
+              "leftValue": "={{ $json.in_cooldown }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000008e",
+      "name": "Log Cooldown Skip",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2640, 540],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/system_events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Prefer", "value": "return=minimal" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_type: 'author.cooldown_skip', source: 'n8n-chain-2a', actor: 'author-memory', severity: 'info', governance_profile: 'business_light', domain: 'marketing', target_type: 'author', target_id: $json.author_url, agent_name: 'author-memory', model: 'n/a', payload: { captured_post_id: $json.captured_post_id, author_url: $json.author_url, reason: 'cooldown_active' }, correlation_id: $json.correlation_id, occurred_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000008f",
+      "name": "Respond Cooldown Skip",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2880, 540],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 200,
+        "responseBody": "={{ JSON.stringify({ skipped: true, reason: 'author_in_cooldown', author_url: $('Parse Cooldown Result').item.json.author_url, captured_post_id: $('Parse Cooldown Result').item.json.captured_post_id }) }}"
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000009",
+      "name": "Run Classifier",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1920, 360],
+      "parameters": {
+        "command": "=# TODO: roep hier je eigen classifier aan — input via $json.captured_post_id; moet op stdout JSON printen met keys captured_post_id, register, confidence, queue_row_id, rationale"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000010",
+      "name": "Parse Classifier Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 360],
+      "parameters": {
+        "jsCode": "const stdout = ($json.stdout || '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(stdout);\n} catch (err) {\n  throw new Error('Classifier produced unparseable output: ' + stdout);\n}\nif (!parsed.register) {\n  throw new Error('Classifier did not return register');\n}\nconst ctx = $('Parse Ingester Output').item.json;\nreturn [{ json: { ...ctx, register: parsed.register, confidence: parsed.confidence, queue_row_id: parsed.queue_row_id, rationale: parsed.rationale } }];"
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000011",
+      "name": "Run Writer",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2400, 360],
+      "parameters": {
+        "command": "=# TODO: roep hier je eigen concept-schrijver aan — input via $json.captured_post_id; moet op stdout JSON printen met keys captured_post_id, queue_row_id, workflow_state, register"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000012",
+      "name": "Parse Writer Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2640, 360],
+      "parameters": {
+        "jsCode": "const stdout = ($json.stdout || '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(stdout);\n} catch (err) {\n  throw new Error('Writer produced unparseable output: ' + stdout);\n}\nif (!parsed.workflow_state) {\n  throw new Error('Writer did not return workflow_state');\n}\nconst ctx = $('Parse Classifier Output').item.json;\nreturn [{ json: { ...ctx, queue_row_id: parsed.queue_row_id, workflow_state: parsed.workflow_state } }];"
+      }
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000013",
+      "name": "Supabase Update Captured Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2880, 360],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/captured_posts?id=eq.{{ $json.captured_post_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            { "name": "x-mc-api-key", "value": "={{ $env.MC_API_KEY }}" },
+            { "name": "Prefer", "value": "return=minimal" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workflow_state: $json.workflow_state, updated_at: new Date().toISOString(), updated_by: 'n8n-chain-2a' }) }}",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c2a-0001-0001-0001-000000000014",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3120, 360],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 200,
+        "responseBody": "={{ JSON.stringify({ success: true, captured_post_id: $json.captured_post_id, queue_row_id: $json.queue_row_id, workflow_state: $json.workflow_state, register: $json.register }) }}"
+      }
+    },
+    {
+      "id": "c2a-0002-0001-0001-000000000001",
+      "name": "Error Aggregator",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1920, 720],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-error-msg",
+              "name": "error_message",
+              "value": "={{ $json.error?.message || $json.message || JSON.stringify($json) }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-error-node",
+              "name": "error_node",
+              "value": "={{ $json.error?.node?.name || 'unknown' }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-correlation",
+              "name": "correlation_id",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-url",
+              "name": "url",
+              "value": "={{ $('Extract Request Context').item.json.url || 'unknown' }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "c2a-0002-0001-0001-000000000002",
+      "name": "Log Error to system.events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2160, 720],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/system_events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            { "name": "x-mc-api-key", "value": "={{ $env.MC_API_KEY }}" },
+            { "name": "Prefer", "value": "return=minimal" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_type: 'chain_2a.pipeline_failed', source: 'n8n-chain-2a', payload: { error: $json.error_message, node: $json.error_node, url: $json.url }, correlation_id: $json.correlation_id, governance_profile: 'business_light', occurred_at: new Date().toISOString(), created_by: 'n8n-chain-2a' }) }}",
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "c2a-0002-0001-0001-000000000003",
+      "name": "Telegram Notify Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2400, 720],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ Chain 2a pipeline mislukt\\n\\nNode: {{ $('Error Aggregator').item.json.error_node }}\\nURL: {{ $('Error Aggregator').item.json.url }}\\nCorrelation: {{ $('Error Aggregator').item.json.correlation_id }}\\n\\nError: {{ $('Error Aggregator').item.json.error_message }}",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credential",
+          "name": "VNX Telegram Bot"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "c2a-0002-0001-0001-000000000004",
+      "name": "Respond 500",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2640, 720],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 500,
+        "responseBody": "={{ JSON.stringify({ error: 'Pipeline failed', message: $('Error Aggregator').item.json.error_message, correlation_id: $('Error Aggregator').item.json.correlation_id }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook URL Paste": {
+      "main": [[{ "node": "Validate API Key", "type": "main", "index": 0 }]]
+    },
+    "Validate API Key": {
+      "main": [
+        [{ "node": "Extract Request Context", "type": "main", "index": 0 }],
+        [{ "node": "Respond 401", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Request Context": {
+      "main": [
+        [{ "node": "Apify Cost Pre-flight", "type": "main", "index": 0 }]
+      ]
+    },
+    "Apify Cost Pre-flight": {
+      "main": [
+        [{ "node": "Parse Cost Result", "type": "main", "index": 0 }],
+        [{ "node": "Error Aggregator", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Cost Result": {
+      "main": [[{ "node": "Run Ingester", "type": "main", "index": 0 }]]
+    },
+    "Run Ingester": {
+      "main": [
+        [{ "node": "Parse Ingester Output", "type": "main", "index": 0 }],
+        [{ "node": "Error Aggregator", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Ingester Output": {
+      "main": [[{ "node": "Check Author Cooldown", "type": "main", "index": 0 }]]
+    },
+    "Check Author Cooldown": {
+      "main": [
+        [{ "node": "Parse Cooldown Result", "type": "main", "index": 0 }],
+        [{ "node": "Parse Cooldown Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Cooldown Result": {
+      "main": [[{ "node": "Author Cooldown Branch", "type": "main", "index": 0 }]]
+    },
+    "Author Cooldown Branch": {
+      "main": [
+        [{ "node": "Log Cooldown Skip", "type": "main", "index": 0 }],
+        [{ "node": "Run Classifier", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Cooldown Skip": {
+      "main": [[{ "node": "Respond Cooldown Skip", "type": "main", "index": 0 }]]
+    },
+    "Run Classifier": {
+      "main": [
+        [{ "node": "Parse Classifier Output", "type": "main", "index": 0 }],
+        [{ "node": "Error Aggregator", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Classifier Output": {
+      "main": [[{ "node": "Run Writer", "type": "main", "index": 0 }]]
+    },
+    "Run Writer": {
+      "main": [
+        [{ "node": "Parse Writer Output", "type": "main", "index": 0 }],
+        [{ "node": "Error Aggregator", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Writer Output": {
+      "main": [
+        [
+          {
+            "node": "Supabase Update Captured Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Update Captured Post": {
+      "main": [
+        [{ "node": "Respond Success", "type": "main", "index": 0 }],
+        [{ "node": "Error Aggregator", "type": "main", "index": 0 }]
+      ]
+    },
+    "Error Aggregator": {
+      "main": [
+        [{ "node": "Log Error to system.events", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Error to system.events": {
+      "main": [
+        [{ "node": "Telegram Notify Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Notify Error": {
+      "main": [[{ "node": "Respond 500", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "automation-starter" },
+    { "name": "chain-2a" },
+    { "name": "f55-pr5" },
+    { "name": "pr-6" },
+    { "name": "pr-v2-051" }
+  ],
+  "pinData": {},
+  "versionId": "1.1.0-pr-v2-051",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "n8n"
+  }
+}

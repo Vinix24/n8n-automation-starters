@@ -1,0 +1,505 @@
+{
+  "name": "Callback Handler",
+  "nodes": [
+    {
+      "id": "cb-0001-0001-0001-0001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "path": "callback-handler",
+        "httpMethod": "POST",
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "id": "cb-0001-0001-0001-0001-000000000002",
+      "name": "Parse Callback Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-chat-id",
+              "name": "chat_id",
+              "value": "={{ $json.body.chat_id }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-callback-data",
+              "name": "callback_data",
+              "value": "={{ $json.body.callback_data || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-query-id",
+              "name": "callback_query_id",
+              "value": "={{ $json.body.callback_query_id }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-from-id",
+              "name": "from_id",
+              "value": "={{ $json.body.from_id }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cb-0001-0001-0001-0001-000000000003",
+      "name": "Answer Callback Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/answerCallbackQuery",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ callback_query_id: $json.callback_query_id }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "cb-0001-0001-0001-0001-000000000004",
+      "name": "Callback Data Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        960,
+        300
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "rules": [
+            {
+              "outputIndex": 0,
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.callback_data }}",
+                    "rightValue": "icp:",
+                    "operator": {
+                      "type": "string",
+                      "operation": "startsWith"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputIndex": 1,
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.callback_data }}",
+                    "rightValue": "abort:",
+                    "operator": {
+                      "type": "string",
+                      "operation": "startsWith"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputIndex": 2,
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.callback_data }}",
+                    "rightValue": "save_dig:",
+                    "operator": {
+                      "type": "string",
+                      "operation": "startsWith"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "cb-0001-0001-0001-0001-000000000005",
+      "name": "Parse ICP Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        180
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// callback_data format: icp:<watchlist_id>:<label>\nconst raw = $json.callback_data || '';\nconst parts = raw.replace(/^icp:/, '').split(':');\nconst watchlistId = parts[0] || null;\nconst icpLabel = parts[1] || null;\n\nconst validLabels = ['peer', 'mkb-directeur', 'tech-decider', 'overslaan'];\nconst isValid = watchlistId && icpLabel && validLabels.includes(icpLabel);\n\nconst labelEmoji = { peer: '👥', 'mkb-directeur': '🏢', 'tech-decider': '💻', overslaan: '⏭' };\nconst labelNL = { peer: 'Peer', 'mkb-directeur': 'MKB-directeur', 'tech-decider': 'Tech-decider', overslaan: 'Overslaan' };\n\nreturn [{ json: {\n  chat_id: $json.chat_id,\n  callback_query_id: $json.callback_query_id,\n  watchlist_id: watchlistId,\n  icp_label: icpLabel,\n  is_valid: isValid,\n  label_emoji: isValid ? (labelEmoji[icpLabel] || '') : '',\n  label_nl: isValid ? (labelNL[icpLabel] || icpLabel) : icpLabel\n}}];"
+      }
+    },
+    {
+      "id": "cb-pr-v2-032-0001-000000000001",
+      "name": "PATCH Watchlist ICP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        180
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/creator_watchlist?id=eq.{{ $json.watchlist_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ icp_label: $json.icp_label }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "cb-pr-v2-032-0001-000000000002",
+      "name": "Send ICP Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1680,
+        180
+      ],
+      "parameters": {
+        "chatId": "={{ $('Parse ICP Data').first().json.chat_id }}",
+        "text": "={{ $('Parse ICP Data').first().json.label_emoji + ' <b>' + $('Parse ICP Data').first().json.label_nl + '</b> opgeslagen voor dit profiel.' }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credential",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "cb-0001-0001-0001-0001-000000000006",
+      "name": "Stub Abort Handler",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        300
+      ],
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "=⛔ Actie afgebroken: {{ $json.callback_data.replace('abort:', '') }}\\n\\nChain 2 /abort handler — coming in PR-V2-033.",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credential",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "cb-0001-0001-0001-0001-000000000007",
+      "name": "Stub Unknown Callback",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        540
+      ],
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "=❓ Onbekende callback: {{ $json.callback_data }}",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credential",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "cb-pr-v2-052-0001-000000000001",
+      "name": "Parse Save Dig",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        420
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// callback_data format: save_dig:<keyword_id>\nconst raw = $json.callback_data || '';\nconst keyword_id = raw.replace(/^save_dig:/, '').trim();\nconst is_valid = keyword_id.length > 0;\nreturn [{ json: {\n  chat_id: $json.chat_id,\n  callback_query_id: $json.callback_query_id,\n  keyword_id: keyword_id,\n  is_valid: is_valid\n}}];"
+      }
+    },
+    {
+      "id": "cb-pr-v2-052-0001-000000000002",
+      "name": "PATCH Keyword Permanent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        420
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/monitoring_keywords?id=eq.{{ $json.keyword_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ notes: null }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "cb-pr-v2-052-0001-000000000003",
+      "name": "Send Save Dig Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1680,
+        420
+      ],
+      "parameters": {
+        "chatId": "={{ $('Parse Save Dig').first().json.chat_id }}",
+        "text": "=✅ <b>Topic opgeslagen als permanente keyword</b>\n\nHet topic is toegevoegd aan je monitoring_keywords en wordt permanent bijgehouden.",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credential",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Callback Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Callback Data": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer Callback Query": {
+      "main": [
+        [
+          {
+            "node": "Callback Data Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback Data Switch": {
+      "main": [
+        [
+          {
+            "node": "Parse ICP Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stub Abort Handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Save Dig",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stub Unknown Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse ICP Data": {
+      "main": [
+        [
+          {
+            "node": "PATCH Watchlist ICP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PATCH Watchlist ICP": {
+      "main": [
+        [
+          {
+            "node": "Send ICP Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Save Dig": {
+      "main": [
+        [
+          {
+            "node": "PATCH Keyword Permanent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PATCH Keyword Permanent": {
+      "main": [
+        [
+          {
+            "node": "Send Save Dig Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "automation-starter"
+    },
+    {
+      "name": "telegram"
+    },
+    {
+      "name": "pr-v2-006"
+    },
+    {
+      "name": "pr-v2-032"
+    },
+    {
+      "name": "pr-v2-052"
+    }
+  ],
+  "pinData": {},
+  "versionId": "1.2.0-pr-v2-052",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "n8n"
+  }
+}

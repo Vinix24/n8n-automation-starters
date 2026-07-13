@@ -1,0 +1,720 @@
+{
+  "name": "Track Relay — /track command",
+  "nodes": [
+    {
+      "id": "trk-0014-0001-0001-0001-000000000001",
+      "name": "Track Relay Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "track-relay",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000002",
+      "name": "Validate Chat ID",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "condition-chat-id",
+              "leftValue": "={{ String($json.body?.chat_id || $json.body?.from?.id || '') }}",
+              "rightValue": "={{ $env.TELEGRAM_CHAT_ID }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000003",
+      "name": "Unauthorized Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [720, 500],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⛔ Niet geautoriseerd. /track is alleen beschikbaar voor geautoriseerde gebruikers.",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000004",
+      "name": "Parse Track URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body || {};\nconst rawUrl = (body.url || body.linkedin_url || '').trim();\nconst chatId = String(body.chat_id || body.from?.id || '');\nconst messageId = body.message_id || null;\nconst mode = (body.mode || 'track').toLowerCase();\n\n// Validate LinkedIn URL format\nconst isLinkedinUrl = rawUrl.length > 0 && (\n  rawUrl.includes('linkedin.com/posts/') ||\n  rawUrl.includes('linkedin.com/feed/update/') ||\n  rawUrl.includes('linkedin.com/pulse/') ||\n  /linkedin\\.com\\/.*urn:li:/i.test(rawUrl)\n);\n\n// Detect if comment URN is embedded in URL\n// LinkedIn share URLs for comments look like:\n// https://www.linkedin.com/feed/update/urn:li:activity:123?commentUrn=urn:li:comment:(urn:li:activity:123,456)\nconst commentUrnMatch = rawUrl.match(/commentUrn=([^&]+)/);\nconst commentUrn = commentUrnMatch ? decodeURIComponent(commentUrnMatch[1]) : null;\n\n// Extract post URL (strip comment-specific params for cleaner post URL)\nconst postUrl = rawUrl.split('?')[0];\n\nreturn [{\n  json: {\n    linkedin_url: rawUrl,\n    post_url: postUrl,\n    comment_urn: commentUrn,\n    url_type: commentUrn ? 'comment' : 'post',\n    url_valid: isLinkedinUrl,\n    chat_id: chatId,\n    message_id: messageId,\n    mode: mode\n  }\n}];"
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000005",
+      "name": "URL Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [960, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "condition-url-valid",
+              "leftValue": "={{ $json.url_valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000006",
+      "name": "Send Usage Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1200, 500],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ <b>Gebruik:</b> <code>/track &lt;linkedin-url&gt;</code>\n\nVoorbeelden:\n• <code>/track https://www.linkedin.com/posts/...</code>\n• <code>/track https://www.linkedin.com/feed/update/urn:li:activity:...</code>",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000007",
+      "name": "Apify Scrape Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apify.com/v2/acts/apify~linkedin-post-scraper/runs?waitForFinish=120",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.APIFY_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ startUrls: [{ url: $json.linkedin_url }], maxComments: 200, proxyConfiguration: { useApifyProxy: true } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 150000
+        }
+      },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000008",
+      "name": "Fetch Apify Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.apify.com/v2/datasets/{{ $json.data?.defaultDatasetId }}/items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.APIFY_TOKEN }}" }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000009",
+      "name": "Process Scrape Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst ownUrl = ($env.OWN_LINKEDIN_URL || '').toLowerCase().replace(/\\/$/, '');\nconst ownSlug = ownUrl.split('/in/')[1] || '';\n\n// Flatten dataset items (Apify returns array of arrays or flat array)\nlet dataset = [];\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d)) {\n    dataset = dataset.concat(d);\n  } else if (d && typeof d === 'object') {\n    dataset.push(d);\n  }\n}\n\nif (dataset.length === 0) {\n  return [{ json: {\n    error: true,\n    error_message: 'Apify returned 0 items for this URL',\n    post: null,\n    own_comments: [],\n    other_comments: [],\n    comment_count: 0,\n    own_comment_found: false\n  }}];\n}\n\nconst postData = dataset[0];\nconst allComments = postData.comments || [];\n\nconst ownComments = [];\nconst otherComments = [];\n\nfor (const c of allComments) {\n  const authorUrl = (c.author?.url || c.commenterProfileUrl || '').toLowerCase().replace(/\\/$/, '');\n  if (authorUrl && ownUrl && (authorUrl === ownUrl || (ownSlug && authorUrl.includes(ownSlug)))) {\n    ownComments.push(c);\n  } else {\n    otherComments.push(c);\n  }\n}\n\nreturn [{ json: {\n  error: false,\n  post_url: postData.url || postData.postUrl || '',\n  post_text: postData.text || postData.content || '',\n  author_name: postData.author?.name || postData.authorName || '',\n  author_url: postData.author?.url || postData.authorProfileUrl || '',\n  author_headline: postData.author?.headline || '',\n  likes: postData.likesCount || postData.likes || 0,\n  comment_count: allComments.length,\n  own_comments: ownComments,\n  other_comments: otherComments,\n  own_comment_found: ownComments.length > 0,\n  scraped_at: new Date().toISOString()\n}}];"
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000010",
+      "name": "Insert Captured Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/captured_posts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=representation,resolution=ignore-duplicates" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ url: $json.post_url, source: 'mobile-track', author_name: $json.author_name, author_linkedin_url: $json.author_url, author_headline: $json.author_headline, content: $json.post_text, likes: $json.likes, comments: $json.comment_count, analysis_status: 'pending', workflow_state: 'captured', captured_at: $json.scraped_at, created_by: 'telegram-track-relay', version: 1 }]) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000011",
+      "name": "Insert Comment History",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Build comment_history rows for your own comments found under the post\nconst processed = $('Process Scrape Output').first().json;\nconst ownComments = processed.own_comments || [];\n\nif (ownComments.length === 0) {\n  return [{ json: { own_comments_inserted: 0, skip_reason: 'no_own_comments_found' } }];\n}\n\nconst rows = ownComments.map(c => ({\n  comment_url: c.url || c.commentUrl || `${processed.post_url}#comment-${c.id || Math.random()}`,\n  post_url: processed.post_url,\n  commenter_name: c.author?.name || null,\n  commenter_url: c.author?.url || ($env.OWN_LINKEDIN_URL || ''),\n  commenter_headline: c.author?.headline || '',\n  comment_text: c.text || c.content || '',\n  comment_date: c.createdAt || c.date || new Date().toISOString(),\n  likes: c.likesCount || c.likes || 0,\n  is_reply: c.isReply || false,\n  source: 'mobile-track',\n  created_by: 'telegram-track-relay',\n  version: 1\n}));\n\n// POST to Supabase\nreturn [{ json: { comment_history_rows: rows, own_comments_inserted: rows.length } }];"
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000012",
+      "name": "Post Comment History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2400, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/comment_history",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal,resolution=ignore-duplicates" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.comment_history_rows || []) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000013",
+      "name": "Insert Scraped Comments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/scraped_comments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($('Process Scrape Output').first().json.other_comments || []).map(c => ({ post_url: $('Process Scrape Output').first().json.post_url, commenter_name: c.author?.name || '', commenter_url: c.author?.url || '', commenter_headline: c.author?.headline || '', comment_text: c.text || c.content || '', likes: c.likesCount || c.likes || 0, is_reply: c.isReply || false }))) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000014",
+      "name": "Write System Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/system.events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ event_type: 'track.post.ingested', source: 'telegram-track-relay', actor: 'n8n', severity: 'info', correlation_id: $execution.id, payload: { governance_profile: 'business_light', domain: 'marketing', target_type: 'captured_post', target_id: null, model: 'n/a', agent: 'telegram-track-relay', url: $('Process Scrape Output').first().json.post_url, comment_count: $('Process Scrape Output').first().json.comment_count, own_comment_found: $('Process Scrape Output').first().json.own_comment_found, other_comment_count: ($('Process Scrape Output').first().json.other_comments || []).length } }]) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000015",
+      "name": "Send Track Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [3120, 300],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ (() => {\n  const processed = $('Process Scrape Output').first().json;\n  if (processed.error) {\n    return `⚠️ <b>Track mislukt</b>\\n\\n${processed.error_message || 'Apify kon de post niet scrapen.'}\\n\\n<i>Controleer of de URL correct is.</i>`;\n  }\n  const ownLine = processed.own_comment_found\n    ? `✅ 1 eigen comment herkend en opgeslagen`\n    : `ℹ️ Geen eigen comment gevonden`;\n  const otherCount = (processed.other_comments || []).length;\n  return `✅ <b>Post getracked!</b>\\n\\n📄 ${processed.post_text?.slice(0, 80) || 'Post tekst niet beschikbaar'}...\\n\\n💬 ${processed.comment_count} comments gescraped\\n${ownLine}\\n👥 ${otherCount} reacties van anderen opgeslagen\\n\\n<i>Post is opgeslagen voor content analyse.</i>`;\n})() }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000016",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3360, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}"
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000017",
+      "name": "Is Track Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2160, 500],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "condition-is-track-mode",
+              "leftValue": "={{ $('Parse Track URL').first().json.mode }}",
+              "rightValue": "track",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000018",
+      "name": "Insert Scraped Comments Scrape",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2400, 550],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/scraped_comments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($('Process Scrape Output').first().json.other_comments || []).concat($('Process Scrape Output').first().json.own_comments || []).map(c => ({ post_url: $('Process Scrape Output').first().json.post_url, commenter_name: c.author?.name || '', commenter_url: c.author?.url || '', commenter_headline: c.author?.headline || '', comment_text: c.text || c.content || '', likes: c.likesCount || c.likes || 0, is_reply: c.isReply || false }))) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000019",
+      "name": "Write System Event Scrape",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 550],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/system.events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ event_type: 'scrape.completed', source: 'telegram-track-relay', actor: 'n8n', severity: 'info', correlation_id: $execution.id, payload: { governance_profile: 'business_light', domain: 'marketing', target_type: 'captured_post', target_id: null, model: 'n/a', agent: 'telegram-scrape-relay', url: $('Process Scrape Output').first().json.post_url, comment_count: $('Process Scrape Output').first().json.comment_count } }]) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "trk-0014-0001-0001-0001-000000000020",
+      "name": "Send Scrape Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2880, 550],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ (() => {\n  const processed = $('Process Scrape Output').first().json;\n  if (processed.error) {\n    return `⚠️ <b>Scrape mislukt</b>\\n\\n${processed.error_message || 'Apify kon de post niet scrapen.'}\\n\\n<i>Controleer of de URL correct is.</i>`;\n  }\n  const otherCount = (processed.other_comments || []).length + (processed.own_comments || []).length;\n  return `✅ <b>Post gescraped!</b>\\n\\n📄 ${processed.post_text?.slice(0, 80) || 'Post tekst niet beschikbaar'}...\\n\\n💬 ${processed.comment_count} comments gescraped\\n👥 ${otherCount} reacties opgeslagen\\n\\n<i>Post en comments zijn opgeslagen (geen identity-check).</i>`;\n})() }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Track Relay Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Chat ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Chat ID": {
+      "main": [
+        [
+          {
+            "node": "Parse Track URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unauthorized Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Track URL": {
+      "main": [
+        [
+          {
+            "node": "URL Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "URL Valid?": {
+      "main": [
+        [
+          {
+            "node": "Apify Scrape Post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Usage Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify Scrape Post": {
+      "main": [
+        [
+          {
+            "node": "Fetch Apify Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Apify Dataset": {
+      "main": [
+        [
+          {
+            "node": "Process Scrape Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Scrape Output": {
+      "main": [
+        [
+          {
+            "node": "Insert Captured Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Captured Post": {
+      "main": [
+        [
+          {
+            "node": "Is Track Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Track Mode?": {
+      "main": [
+        [
+          {
+            "node": "Insert Comment History",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Scraped Comments Scrape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Scraped Comments Scrape": {
+      "main": [
+        [
+          {
+            "node": "Write System Event Scrape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write System Event Scrape": {
+      "main": [
+        [
+          {
+            "node": "Send Scrape Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Scrape Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Comment History": {
+      "main": [
+        [
+          {
+            "node": "Post Comment History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post Comment History": {
+      "main": [
+        [
+          {
+            "node": "Insert Scraped Comments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Scraped Comments": {
+      "main": [
+        [
+          {
+            "node": "Write System Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write System Event": {
+      "main": [
+        [
+          {
+            "node": "Send Track Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Track Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Amsterdam",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "automation-starter" },
+    { "name": "telegram" },
+    { "name": "pr-v2-030" },
+    { "name": "pr-v2-031" },
+    { "name": "chain-2b" }
+  ],
+  "pinData": null,
+  "versionId": "1.1.0-pr-v2-031",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "n8n"
+  }
+}

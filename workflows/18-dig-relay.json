@@ -1,0 +1,578 @@
+{
+  "name": "Dig Relay — /dig command",
+  "nodes": [
+    {
+      "id": "dig-0018-0001-0001-0001-000000000001",
+      "name": "Dig Relay Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dig-relay",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000002",
+      "name": "Validate Chat ID",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "condition-chat-id",
+              "leftValue": "={{ String($json.body?.chat_id || '') }}",
+              "rightValue": "={{ $env.TELEGRAM_CHAT_ID }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000003",
+      "name": "Unauthorized Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [720, 500],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⛔ Niet geautoriseerd. /dig is alleen beschikbaar voor geautoriseerde gebruikers.",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000004",
+      "name": "Parse Dig Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body || {};\nconst rawTopic = (body.topic || '').trim();\nconst chatId = String(body.chat_id || '');\nconst messageId = body.message_id || null;\n\nconst topicValid = rawTopic.length > 0 && rawTopic.length <= 100;\n\nreturn [{\n  json: {\n    topic: rawTopic,\n    topic_valid: topicValid,\n    chat_id: chatId,\n    message_id: messageId\n  }\n}];"
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000005",
+      "name": "Topic Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [960, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "condition-topic-valid",
+              "leftValue": "={{ $json.topic_valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000006",
+      "name": "Send Usage Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1200, 500],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ <b>Gebruik:</b> <code>/dig &lt;topic&gt;</code>\n\nVoorbeelden:\n• <code>/dig AI agents</code>\n• <code>/dig claude code</code>",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000007",
+      "name": "Send Processing",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1200, 300],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⏳ On-demand scout gestart voor: <b>{{ $json.topic }}</b>\n\n<i>Budget-check en Apify-run...</i>",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000008",
+      "name": "Fetch MTD Spend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/apify_mtd_spend",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Profile", "value": "system" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000009",
+      "name": "Preflight Budget Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Budget guard: monthly cap = €50\n// Estimate one dig run at €0.50\nconst BUDGET_CAP_EUR = 50;\nconst ESTIMATED_RUN_EUR = 0.50;\n\nconst mtdSpend = parseFloat($json) || 0;\nconst projectedTotal = mtdSpend + ESTIMATED_RUN_EUR;\nconst withinBudget = projectedTotal <= BUDGET_CAP_EUR;\n\nconst topicData = $('Parse Dig Topic').first().json;\n\nreturn [{\n  json: {\n    mtd_spend_eur: mtdSpend,\n    estimated_run_eur: ESTIMATED_RUN_EUR,\n    projected_total_eur: projectedTotal,\n    budget_cap_eur: BUDGET_CAP_EUR,\n    within_budget: withinBudget,\n    topic: topicData.topic,\n    chat_id: topicData.chat_id,\n    message_id: topicData.message_id\n  }\n}];"
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000010",
+      "name": "Budget OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1920, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "condition-budget-ok",
+              "leftValue": "={{ $json.within_budget }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000011",
+      "name": "Send Budget Rejected",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2160, 500],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=💸 <b>Budget bereikt, dig overgeslagen</b>\n\nMTD-spend: €{{ $json.mtd_spend_eur.toFixed(2) }} / €{{ $json.budget_cap_eur }}\nProjected: €{{ $json.projected_total_eur.toFixed(2) }}\n\n<i>Budget hernieuwd op 1e van de maand.</i>",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000012",
+      "name": "Insert Dig Keyword",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/monitoring_keywords",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=representation,resolution=merge-duplicates" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{\n  keyword: $json.topic,\n  platforms: ['linkedin'],\n  priority: 'high',\n  is_active: true,\n  notes: 'dig:expires:' + new Date(Date.now() + 3600000).toISOString()\n}]) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000013",
+      "name": "Get Keyword ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst preflight = $('Preflight Budget Check').first().json;\n\nlet keywordId = null;\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d) && d.length > 0 && d[0].id) {\n    keywordId = d[0].id;\n    break;\n  } else if (d && d.id) {\n    keywordId = d.id;\n    break;\n  }\n}\n\nreturn [{\n  json: {\n    keyword_id: keywordId,\n    topic: preflight.topic,\n    chat_id: preflight.chat_id\n  }\n}];"
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000014",
+      "name": "Start Apify Scout",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apify.com/v2/acts/apidojo~linkedin-scraper/runs?waitForFinish=120",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.APIFY_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ startUrls: [{ url: 'https://www.linkedin.com/search/results/content/?keywords=' + encodeURIComponent($json.topic) + '&datePosted=past-week&sortBy=relevance' }], postsLimit: 10, commentsLimit: 0, includeProfileMetadata: false }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 150000
+        }
+      },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000015",
+      "name": "Fetch Scout Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.apify.com/v2/datasets/{{ $json.data?.defaultDatasetId }}/items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.APIFY_TOKEN }}" }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000016",
+      "name": "Parse Top 5 Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3120, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst ctx = $('Get Keyword ID').first().json;\n\nlet dataset = [];\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d)) dataset = dataset.concat(d);\n  else if (d && typeof d === 'object' && !d.error) dataset.push(d);\n}\n\nfunction safeInt(val) {\n  const n = parseInt(val, 10);\n  return isNaN(n) ? 0 : n;\n}\n\nconst posts = dataset\n  .filter(p => p && (p.url || p.postUrl || p.linkedinUrl))\n  .map(p => {\n    const eng = p.engagement || {};\n    return {\n      url: (p.url || p.postUrl || p.linkedinUrl || '').split('?')[0],\n      text: (p.text || p.content || p.description || '').slice(0, 120),\n      reactions: safeInt(eng.likes || p.likes),\n      comments: safeInt(eng.comments || p.commentsCount),\n      score: safeInt(eng.likes || p.likes) + safeInt(eng.comments || p.commentsCount) * 2\n    };\n  })\n  .sort((a, b) => b.score - a.score)\n  .slice(0, 5);\n\nreturn [{\n  json: {\n    posts,\n    post_count: posts.length,\n    topic: ctx.topic,\n    keyword_id: ctx.keyword_id,\n    chat_id: ctx.chat_id\n  }\n}];"
+      }
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000017",
+      "name": "Send Top5 Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3360, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (function() {\n  const data = $json;\n  const topic = data.topic || '';\n  const posts = data.posts || [];\n  const keywordId = data.keyword_id || 'unknown';\n\n  let text = '🔍 <b>Top-' + posts.length + ' LinkedIn posts voor \"' + topic + '\"</b>\\n\\n';\n  if (posts.length === 0) {\n    text += '<i>Geen resultaten gevonden voor dit topic.</i>';\n  } else {\n    posts.forEach((p, i) => {\n      text += (i + 1) + '. ' + (p.text || '(geen tekst)') + '\\n';\n      text += '   💬 ' + p.comments + ' | 👍 ' + p.reactions + '\\n';\n      text += '   🔗 ' + p.url + '\\n\\n';\n    });\n  }\n\n  const payload = {\n    chat_id: data.chat_id,\n    parse_mode: 'HTML',\n    text: text,\n    disable_web_page_preview: true\n  };\n\n  if (keywordId !== 'unknown') {\n    payload.reply_markup = JSON.stringify({\n      inline_keyboard: [[\n        { text: '💾 Save voor toekomst', callback_data: 'save_dig:' + keywordId }\n      ]]\n    });\n  }\n\n  return JSON.stringify(payload);\n})() }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000018",
+      "name": "Log Apify Dig Usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3600, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/apify_usage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Profile", "value": "system" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{\n  actor: 'apidojo/linkedin-scraper',\n  started_at: new Date().toISOString(),\n  items_returned: $('Parse Top 5 Results').first().json.post_count,\n  cost_estimated_eur: 0.50,\n  state: 'succeeded',\n  trigger: 'dig',\n  correlation_id: $execution.id\n}]) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000019",
+      "name": "Write System Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3840, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/system.events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{\n  event_type: 'dig.topic.scouted',\n  source: 'telegram-dig-relay',\n  actor: 'n8n',\n  severity: 'info',\n  correlation_id: $execution.id,\n  payload: {\n    governance_profile: 'business_light',\n    domain: 'marketing',\n    target_type: 'monitoring_keywords',\n    target_id: $('Get Keyword ID').first().json.keyword_id,\n    model: 'n/a',\n    agent: 'telegram-dig-relay',\n    topic: $('Parse Dig Topic').first().json.topic,\n    post_count: $('Parse Top 5 Results').first().json.post_count\n  }\n}]) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "dig-0018-0001-0001-0001-000000000020",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [4080, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Dig Relay Webhook": {
+      "main": [
+        [{ "node": "Validate Chat ID", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Chat ID": {
+      "main": [
+        [{ "node": "Parse Dig Topic", "type": "main", "index": 0 }],
+        [{ "node": "Unauthorized Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Dig Topic": {
+      "main": [
+        [{ "node": "Topic Valid?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Topic Valid?": {
+      "main": [
+        [{ "node": "Send Processing", "type": "main", "index": 0 }],
+        [{ "node": "Send Usage Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Processing": {
+      "main": [
+        [{ "node": "Fetch MTD Spend", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch MTD Spend": {
+      "main": [
+        [{ "node": "Preflight Budget Check", "type": "main", "index": 0 }]
+      ]
+    },
+    "Preflight Budget Check": {
+      "main": [
+        [{ "node": "Budget OK?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Budget OK?": {
+      "main": [
+        [{ "node": "Insert Dig Keyword", "type": "main", "index": 0 }],
+        [{ "node": "Send Budget Rejected", "type": "main", "index": 0 }]
+      ]
+    },
+    "Insert Dig Keyword": {
+      "main": [
+        [{ "node": "Get Keyword ID", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Keyword ID": {
+      "main": [
+        [{ "node": "Start Apify Scout", "type": "main", "index": 0 }]
+      ]
+    },
+    "Start Apify Scout": {
+      "main": [
+        [{ "node": "Fetch Scout Dataset", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Scout Dataset": {
+      "main": [
+        [{ "node": "Parse Top 5 Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Top 5 Results": {
+      "main": [
+        [{ "node": "Send Top5 Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Top5 Results": {
+      "main": [
+        [{ "node": "Log Apify Dig Usage", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Apify Dig Usage": {
+      "main": [
+        [{ "node": "Write System Event", "type": "main", "index": 0 }]
+      ]
+    },
+    "Write System Event": {
+      "main": [
+        [{ "node": "Respond OK", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Amsterdam",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "automation-starter" },
+    { "name": "telegram" },
+    { "name": "pr-v2-052" },
+    { "name": "chain-3" }
+  ],
+  "pinData": null,
+  "versionId": "1.0.0-pr-v2-052",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "n8n"
+  }
+}

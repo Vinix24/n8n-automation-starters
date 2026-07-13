@@ -1,0 +1,294 @@
+{
+  "name": "Self-Scout Weekly",
+  "nodes": [
+    {
+      "id": "ss-0001-0001-0001-0001-000000000001",
+      "name": "Weekly Cron",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * 0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ss-0001-0001-0001-0001-000000000002",
+      "name": "Start Apify Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [480, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apify.com/v2/acts/apidojo~linkedin-scraper/runs?waitForFinish=300",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.APIFY_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ profileUrls: [$env.OWN_LINKEDIN_URL || '<YOUR_LINKEDIN_PROFILE_URL>'], postsLimit: 200, commentsLimit: 500, includeProfileMetadata: false }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "ss-0001-0001-0001-0001-000000000003",
+      "name": "Set Run Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [720, 300],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-run-id",
+              "name": "run_id",
+              "value": "={{ $json.data.id }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-dataset-id",
+              "name": "dataset_id",
+              "value": "={{ $json.data.defaultDatasetId }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-cost",
+              "name": "cost_usd",
+              "value": "={{ $json.data.usageTotalUsd || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "assign-started",
+              "name": "started_at",
+              "value": "={{ $json.data.startedAt }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-finished",
+              "name": "finished_at",
+              "value": "={{ $json.data.finishedAt || new Date().toISOString() }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ss-0001-0001-0001-0001-000000000004",
+      "name": "Fetch Dataset Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [960, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.apify.com/v2/datasets/{{ $json.dataset_id }}/items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.APIFY_TOKEN }}" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ss-0001-0001-0001-0001-000000000005",
+      "name": "Aggregate Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\nreturn [{ json: { items } }];"
+      }
+    },
+    {
+      "id": "ss-0001-0001-0001-0001-000000000006",
+      "name": "Parse Scout Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 300],
+      "parameters": {
+        "jsCode": "// Self-scout data parser\n// Transforms Apify linkedin-scraper items → Supabase-ready rows\nconst now = new Date().toISOString();\nconst runCtx = $('Set Run Context').item.json;\nconst allItems = ($json.items || []);\n\nfunction normUrl(url) {\n  if (!url) return '';\n  url = url.trim().replace(/\\/$/, '').toLowerCase();\n  if (!url.startsWith('http')) url = 'https://' + url;\n  return url.replace('://www.linkedin.com', '://linkedin.com').split('?')[0];\n}\n\nfunction safeInt(val) {\n  const n = parseInt(val, 10);\n  return isNaN(n) ? 0 : n;\n}\n\nconst posts = [];\nconst comments = [];\n\nfor (const item of allItems) {\n  const postUrl = normUrl(item.url || item.linkedinUrl || item.postUrl || '');\n  if (!postUrl) continue;\n\n  const eng = item.engagement || {};\n  const postedAt = item.postedAt || {};\n  const dateRaw = postedAt.date || item.date || item.publishedAt || item.postedDate || '';\n  const postDate = dateRaw ? String(dateRaw).substring(0, 10) : null;\n  const rawImpressions = item.impressions != null ? item.impressions : (item.views != null ? item.views : null);\n\n  posts.push({\n    post_url: postUrl,\n    post_text: item.text || item.content || item.description || null,\n    post_date: postDate,\n    reactions: safeInt(eng.likes || item.likes),\n    comments_count: safeInt(eng.comments || item.commentsCount),\n    reposts: safeInt(eng.reposts || item.reposts),\n    impressions: rawImpressions !== null ? safeInt(rawImpressions) : null,\n    source: 'apify-self-scout',\n    created_by: 'system',\n    updated_at: now,\n  });\n\n  for (const c of (item.comments || [])) {\n    const commentUrl = normUrl(c.url || c.linkedinUrl || c.commentUrl || '');\n    if (!commentUrl) continue;\n    const author = c.author || {};\n    const cPostedAt = c.postedAt || {};\n    const cEng = c.engagement || {};\n    comments.push({\n      comment_url: commentUrl,\n      post_url: postUrl,\n      commenter_name: author.name || c.commenterName || null,\n      commenter_url: normUrl(author.url || c.commenterUrl || '') || null,\n      commenter_headline: author.headline || c.commenterHeadline || null,\n      comment_text: c.text || c.content || null,\n      comment_date: cPostedAt.date || c.date || c.publishedAt || null,\n      likes: safeInt(cEng.likes || c.likes),\n      is_reply: !!(c.isReply || c.parentId),\n      source: 'apify-self-scout',\n      created_by: 'system',\n    });\n  }\n}\n\nreturn [{\n  json: {\n    posts,\n    comments,\n    post_count: posts.length,\n    comment_count: comments.length,\n    run_id: runCtx.run_id,\n    dataset_id: runCtx.dataset_id,\n    cost_usd: runCtx.cost_usd,\n    started_at: runCtx.started_at,\n    finished_at: runCtx.finished_at,\n    items_returned: allItems.length,\n  }\n}];"
+      }
+    },
+    {
+      "id": "ss-0001-0001-0001-0001-000000000007",
+      "name": "Upsert Own Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1680, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/own_post_analytics",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Prefer", "value": "return=minimal,resolution=merge-duplicates" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.posts) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "ss-0001-0001-0001-0001-000000000008",
+      "name": "Insert Comment History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1920, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/comment_history",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Prefer", "value": "return=minimal,resolution=ignore-duplicates" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Parse Scout Data').item.json.comments) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "ss-0001-0001-0001-0001-000000000009",
+      "name": "Log Apify Usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2160, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/apify_usage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Content-Profile", "value": "system" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $('Parse Scout Data').item.json.run_id, actor: 'apidojo/linkedin-scraper', started_at: $('Parse Scout Data').item.json.started_at, finished_at: $('Parse Scout Data').item.json.finished_at, items_returned: $('Parse Scout Data').item.json.items_returned, cost_actual_eur: $('Parse Scout Data').item.json.cost_usd, state: 'succeeded', trigger: 'cron' }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "ss-0001-0001-0001-0001-000000000010",
+      "name": "Send Telegram Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2400, 300],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🔍 Self-scout: {{ $('Parse Scout Data').item.json.post_count }} posts, {{ $('Parse Scout Data').item.json.comment_count }} comments bijgewerkt (€{{ ($('Parse Scout Data').item.json.cost_usd || 0).toFixed(2) }})",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credential",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Cron": {
+      "main": [
+        [{ "node": "Start Apify Run", "type": "main", "index": 0 }]
+      ]
+    },
+    "Start Apify Run": {
+      "main": [
+        [{ "node": "Set Run Context", "type": "main", "index": 0 }]
+      ]
+    },
+    "Set Run Context": {
+      "main": [
+        [{ "node": "Fetch Dataset Items", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Dataset Items": {
+      "main": [
+        [{ "node": "Aggregate Items", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate Items": {
+      "main": [
+        [{ "node": "Parse Scout Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Scout Data": {
+      "main": [
+        [{ "node": "Upsert Own Posts", "type": "main", "index": 0 }]
+      ]
+    },
+    "Upsert Own Posts": {
+      "main": [
+        [{ "node": "Insert Comment History", "type": "main", "index": 0 }]
+      ]
+    },
+    "Insert Comment History": {
+      "main": [
+        [{ "node": "Log Apify Usage", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Apify Usage": {
+      "main": [
+        [{ "node": "Send Telegram Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "automation-starter" },
+    { "name": "apify" },
+    { "name": "pr-v2-010" }
+  ],
+  "pinData": {},
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "n8n"
+  }
+}

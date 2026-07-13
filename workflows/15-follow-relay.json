@@ -1,0 +1,578 @@
+{
+  "name": "Follow Relay — /follow command",
+  "nodes": [
+    {
+      "id": "flw-0015-0001-0001-0001-000000000001",
+      "name": "Follow Relay Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "follow-relay",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000002",
+      "name": "Validate Chat ID",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "condition-chat-id",
+              "leftValue": "={{ String($json.body?.chat_id || $json.body?.from?.id || '') }}",
+              "rightValue": "={{ $env.TELEGRAM_CHAT_ID }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000003",
+      "name": "Unauthorized Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [720, 500],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⛔ Niet geautoriseerd. /follow is alleen beschikbaar voor geautoriseerde gebruikers.",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000004",
+      "name": "Parse Follow URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body || {};\nconst rawUrl = (body.linkedin_url || body.url || '').trim();\nconst chatId = String(body.chat_id || body.from?.id || '');\nconst messageId = body.message_id || null;\n\n// Validate LinkedIn profile URL\nconst isProfileUrl = rawUrl.length > 0 && (\n  rawUrl.includes('linkedin.com/in/') ||\n  rawUrl.includes('linkedin.com/pub/')\n);\n\n// Normalise: strip trailing slash and query params\nconst profileUrl = rawUrl.split('?')[0].replace(/\\/$/, '');\n\nreturn [{\n  json: {\n    linkedin_url: profileUrl,\n    url_valid: isProfileUrl,\n    chat_id: chatId,\n    message_id: messageId\n  }\n}];"
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000005",
+      "name": "URL Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [960, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "condition-url-valid",
+              "leftValue": "={{ $json.url_valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000006",
+      "name": "Send Usage Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1200, 500],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ <b>Gebruik:</b> <code>/follow &lt;linkedin-profiel-url&gt;</code>\n\nVoorbeelden:\n• <code>/follow https://www.linkedin.com/in/janssen/</code>",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000007",
+      "name": "Send Processing",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1200, 300],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⏳ Profiel ophalen via Apify...",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000008",
+      "name": "Apify Scrape Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apify.com/v2/acts/apify~linkedin-profile-scraper/runs?waitForFinish=120",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.APIFY_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ startUrls: [{ url: $('Parse Follow URL').first().json.linkedin_url }], proxyConfiguration: { useApifyProxy: true } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 150000
+        }
+      },
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000009",
+      "name": "Fetch Apify Profile Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.apify.com/v2/datasets/{{ $json.data?.defaultDatasetId }}/items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "credentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.APIFY_TOKEN }}" }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000010",
+      "name": "Process Profile Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst inputUrl = $('Parse Follow URL').first().json.linkedin_url;\n\n// Flatten dataset items\nlet dataset = [];\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d)) {\n    dataset = dataset.concat(d);\n  } else if (d && typeof d === 'object' && !d.error) {\n    dataset.push(d);\n  }\n}\n\nif (dataset.length === 0) {\n  return [{ json: {\n    error: true,\n    error_message: 'Apify returned 0 profile items for this URL',\n    linkedin_url: inputUrl,\n    full_name: null,\n    headline: null,\n    avatar_url: null\n  }}];\n}\n\nconst profile = dataset[0];\nconst fullName = profile.name || profile.fullName || profile.firstName + ' ' + profile.lastName || null;\nconst headline = profile.headline || profile.occupation || null;\nconst avatarUrl = profile.photo || profile.profilePicture || profile.photoUrl || null;\n\nreturn [{ json: {\n  error: false,\n  linkedin_url: profile.linkedInUrl || profile.profileUrl || inputUrl,\n  full_name: fullName ? fullName.trim() : null,\n  headline: headline ? headline.trim().slice(0, 300) : null,\n  avatar_url: avatarUrl || null,\n  scraped_at: new Date().toISOString()\n}}];"
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000011",
+      "name": "Scrape Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2160, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "condition-scrape-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000012",
+      "name": "Send Scrape Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2400, 500],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ <b>Profiel ophalen mislukt</b>\n\n{{ $json.error_message || 'Apify kon het profiel niet scrapen.' }}\n\n<i>Controleer of de URL correct is en probeer later opnieuw.</i>",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        },
+        "resource": "message"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000013",
+      "name": "Insert Watchlist Row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2400, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/creator_watchlist",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=representation,resolution=merge-duplicates" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{\n  linkedin_url: $json.linkedin_url,\n  full_name: $json.full_name,\n  headline: $json.headline,\n  avatar_url: $json.avatar_url,\n  icp_label: null,\n  priority: 'medium',\n  created_by_chat_id: Number($('Parse Follow URL').first().json.chat_id) || null,\n  version: 1\n}]) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000014",
+      "name": "Get Watchlist ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2640, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst profile = $('Process Profile Output').first().json;\n\nlet watchlistId = null;\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d) && d.length > 0 && d[0].id) {\n    watchlistId = d[0].id;\n    break;\n  } else if (d && d.id) {\n    watchlistId = d.id;\n    break;\n  }\n}\n\nreturn [{ json: {\n  watchlist_id: watchlistId,\n  full_name: profile.full_name,\n  headline: profile.headline,\n  linkedin_url: profile.linkedin_url,\n  insert_ok: watchlistId !== null\n}}];"
+      }
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000015",
+      "name": "Send ICP Keyboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  chat_id: $('Parse Follow URL').first().json.chat_id,\n  parse_mode: 'HTML',\n  text: '👤 <b>' + ($json.full_name || 'Profiel opgeslagen') + '</b>\\n' + ($json.headline ? '<i>' + $json.headline.slice(0, 120) + '</i>\\n' : '') + '\\n🔗 ' + ($json.linkedin_url || '') + '\\n\\nKies ICP-label:',\n  reply_markup: JSON.stringify({\n    inline_keyboard: [\n      [\n        { text: '👥 Peer', callback_data: 'icp:' + ($json.watchlist_id || 'unknown') + ':peer' },\n        { text: '🏢 MKB-directeur', callback_data: 'icp:' + ($json.watchlist_id || 'unknown') + ':mkb-directeur' }\n      ],\n      [\n        { text: '💻 Tech-decider', callback_data: 'icp:' + ($json.watchlist_id || 'unknown') + ':tech-decider' },\n        { text: '⏭ Overslaan', callback_data: 'icp:' + ($json.watchlist_id || 'unknown') + ':overslaan' }\n      ]\n    ]\n  })\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000016",
+      "name": "Write System Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3120, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/system.events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{\n  event_type: 'follow.creator.added',\n  source: 'telegram-follow-relay',\n  actor: 'n8n',\n  severity: 'info',\n  correlation_id: $execution.id,\n  payload: {\n    governance_profile: 'business_light',\n    domain: 'marketing',\n    target_type: 'creator_watchlist',\n    target_id: $('Get Watchlist ID').first().json.watchlist_id,\n    model: 'n/a',\n    agent: 'telegram-follow-relay',\n    linkedin_url: $('Process Profile Output').first().json.linkedin_url,\n    full_name: $('Process Profile Output').first().json.full_name,\n    insert_ok: $('Get Watchlist ID').first().json.insert_ok\n  }\n}]) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "flw-0015-0001-0001-0001-000000000017",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3360, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Follow Relay Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Chat ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Chat ID": {
+      "main": [
+        [
+          {
+            "node": "Parse Follow URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unauthorized Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Follow URL": {
+      "main": [
+        [
+          {
+            "node": "URL Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "URL Valid?": {
+      "main": [
+        [
+          {
+            "node": "Send Processing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Usage Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Processing": {
+      "main": [
+        [
+          {
+            "node": "Apify Scrape Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify Scrape Profile": {
+      "main": [
+        [
+          {
+            "node": "Fetch Apify Profile Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Apify Profile Dataset": {
+      "main": [
+        [
+          {
+            "node": "Process Profile Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Profile Output": {
+      "main": [
+        [
+          {
+            "node": "Scrape Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Failed?": {
+      "main": [
+        [
+          {
+            "node": "Send Scrape Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Watchlist Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Watchlist Row": {
+      "main": [
+        [
+          {
+            "node": "Get Watchlist ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Watchlist ID": {
+      "main": [
+        [
+          {
+            "node": "Send ICP Keyboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send ICP Keyboard": {
+      "main": [
+        [
+          {
+            "node": "Write System Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write System Event": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Amsterdam",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "automation-starter" },
+    { "name": "telegram" },
+    { "name": "pr-v2-032" },
+    { "name": "chain-2b" }
+  ],
+  "pinData": null,
+  "versionId": "1.0.0-pr-v2-032",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "n8n"
+  }
+}

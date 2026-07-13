@@ -1,0 +1,165 @@
+{
+  "name": "21 — Question Clustering Weekly",
+  "versionId": "1.0.0-pr-v2-063",
+  "tags": ["pr-v2-063", "content-pipeline", "cron"],
+  "nodes": [
+    {
+      "id": "qc-0021-0001-0001-0001-000000000001",
+      "name": "Sunday 12:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 360],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 12 * * 0"
+            }
+          ]
+        }
+      },
+      "notes": "Weekly cron: zondag 12:00 UTC. Scrapes 7d of comments, extracts substantive questions, clusters via TF-IDF, inserts content_ideas rows."
+    },
+    {
+      "id": "qc-0021-0001-0001-0001-000000000002",
+      "name": "Run Question Pipeline",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [480, 360],
+      "parameters": {
+        "command": "=# TODO: roep hier je eigen content-pipeline aan, bv. python3 your_pipeline.py — moet op stdout JSON printen met keys comments_fetched, questions_substantive, cluster_count, ideas_inserted, correlation_id"
+      },
+      "notes": "Template placeholder — vervang de command-node door je eigen script/pipeline. Verwacht op stdout: JSON summary met comments_fetched, questions_substantive, cluster_count, ideas_inserted, correlation_id."
+    },
+    {
+      "id": "qc-0021-0001-0001-0001-000000000003",
+      "name": "Parse Pipeline Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 360],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const stdout = $input.first().json.stdout || '';\nconst exitCode = $input.first().json.exitCode || 0;\n// Pipeline prints a single JSON line at end\nconst lines = stdout.trim().split('\\n').filter(l => l.startsWith('{'));\nconst lastJson = lines.length ? lines[lines.length - 1] : '{}';\nlet summary = {};\ntry {\n  summary = JSON.parse(lastJson);\n} catch (e) {\n  summary = { error: 'JSON parse failed', raw: lastJson };\n}\nreturn [{ json: { ...summary, exit_code: exitCode, ran_at: new Date().toISOString() } }];"
+      }
+    },
+    {
+      "id": "qc-0021-0001-0001-0001-000000000004",
+      "name": "Has Ideas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [960, 360],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "cond-has-ideas",
+              "leftValue": "={{ $json.ideas_inserted }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "qc-0021-0001-0001-0001-000000000005",
+      "name": "Telegram Notify Ideas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1200, 240],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, parse_mode: 'HTML', text: '💡 <b>Wekelijkse content-ideeen uit comments</b>\\n\\n' + $json.ideas_inserted + ' nieuwe ideeen op basis van ' + $json.questions_substantive + ' substantiele vragen uit ' + $json.comments_fetched + ' comments.\\n\\nBekijk in je eigen dashboard → Ideas Backlog.' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "qc-0021-0001-0001-0001-000000000006",
+      "name": "Log Cron Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1200, 480],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Content-Profile", "value": "system" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_type: 'content.questions.cron.completed', source: 'n8n-21-question-clustering', actor: 'cron', severity: 'info', correlation_id: $json.correlation_id, payload: { governance_profile: 'business_light', domain: 'content', target_type: 'workflow', target_id: 'n8n-21-question-clustering', agent_name: 'question-pipeline', model: 'haiku', summary: $json } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true
+            }
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Sunday 12:00 UTC": {
+      "main": [[{ "node": "Run Question Pipeline", "type": "main", "index": 0 }]]
+    },
+    "Run Question Pipeline": {
+      "main": [[{ "node": "Parse Pipeline Output", "type": "main", "index": 0 }]]
+    },
+    "Parse Pipeline Output": {
+      "main": [[{ "node": "Has Ideas?", "type": "main", "index": 0 }]]
+    },
+    "Has Ideas?": {
+      "main": [
+        [{ "node": "Telegram Notify Ideas", "type": "main", "index": 0 }],
+        [{ "node": "Log Cron Event", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Notify Ideas": {
+      "main": [[{ "node": "Log Cron Event", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Amsterdam",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "active": false
+}

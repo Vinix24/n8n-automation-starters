@@ -1,0 +1,443 @@
+{
+  "name": "01 — Morning Brief",
+  "nodes": [
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000001",
+      "name": "Cron 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000002",
+      "name": "Get Content Stats",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        500,
+        100
+      ],
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "content.drafts",
+        "returnAll": true,
+        "filterType": "string",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "in",
+              "keyValue": "(draft,review,approved)"
+            },
+            {
+              "keyName": "planned_date",
+              "condition": "gte",
+              "keyValue": "={{ new Date().toISOString().split('T')[0] }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "2",
+          "name": "VNX Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000003",
+      "name": "Get Hot Leads",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "crm.contacts",
+        "returnAll": false,
+        "limit": 5,
+        "filterType": "string",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "lead_score",
+              "condition": "gt",
+              "keyValue": "50"
+            }
+          ]
+        },
+        "options": {
+          "orderByField": "lead_score",
+          "orderByDirection": "desc"
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "2",
+          "name": "VNX Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000004",
+      "name": "Get Pending Comments",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        500,
+        500
+      ],
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "comment_queue",
+        "returnAll": true,
+        "filterType": "string",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "generated"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "2",
+          "name": "VNX Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000005",
+      "name": "Get Pending Ideas",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        500,
+        700
+      ],
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "intelligence.content_ideas",
+        "returnAll": true,
+        "filterType": "string",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "inbox"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "2",
+          "name": "VNX Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000006",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        750,
+        200
+      ],
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      }
+    },
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000007",
+      "name": "Merge Results 2",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        750,
+        500
+      ],
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      }
+    },
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000008",
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Collect data from named source nodes\nif (!items || items.length === 0) return [];\nconst contentItems = $('Get Content Stats').all() || [];\nconst leadItems = $('Get Hot Leads').all() || [];\nconst commentItems = $('Get Pending Comments').all() || [];\nconst ideaItems = $('Get Pending Ideas').all() || [];\n\n// Format date in Dutch\nconst today = new Date();\nconst dateStr = today.toLocaleDateString('nl-NL', {\n  weekday: 'long',\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric',\n  timeZone: 'Europe/Amsterdam'\n});\n\n// --- Content vandaag ---\nconst todayStr = today.toISOString().split('T')[0];\nconst todayContent = contentItems.filter(item => {\n  const d = item.json.planned_date;\n  return d && d.startsWith(todayStr);\n});\n\nlet contentSection = '';\nif (todayContent.length === 0) {\n  contentSection = 'Geen content gepland voor vandaag.';\n} else {\n  contentSection = todayContent.map(item => {\n    const status = item.json.status || 'draft';\n    const statusIcon = status === 'approved' ? '✅' : status === 'review' ? '📝' : '✏️';\n    const platform = item.json.platform || '';\n    const title = item.json.title || 'Zonder titel';\n    return `${statusIcon} [${platform}] ${title} (${status})`;\n  }).join('\\n');\n}\n\n// Upcoming content (next 7 days, excluding today)\nconst nextWeek = new Date(today);\nnextWeek.setDate(nextWeek.getDate() + 7);\nconst upcomingContent = contentItems.filter(item => {\n  const d = item.json.planned_date;\n  return d && d > todayStr && d <= nextWeek.toISOString().split('T')[0];\n});\n\nlet upcomingSection = '';\nif (upcomingContent.length > 0) {\n  upcomingSection = '\\n\\n📅 <b>Komende week:</b>\\n' + upcomingContent.map(item => {\n    const date = item.json.planned_date ? item.json.planned_date.substring(5) : '?';\n    return `• ${date} — ${item.json.title || 'Zonder titel'} (${item.json.status})`;\n  }).join('\\n');\n}\n\n// --- Hot leads ---\nlet leadsSection = '';\nif (leadItems.length === 0) {\n  leadsSection = 'Geen hot leads op dit moment.';\n} else {\n  leadsSection = leadItems.map((item, i) => {\n    const name = item.json.name || 'Onbekend';\n    const score = item.json.lead_score || 0;\n    const lastUpdated = item.json.lead_score_updated_at\n      ? new Date(item.json.lead_score_updated_at).toLocaleDateString('nl-NL', { timeZone: 'Europe/Amsterdam' })\n      : 'n/a';\n    return `${i + 1}. ${name} — score ${score} — ${lastUpdated}`;\n  }).join('\\n');\n}\n\n// --- Pending counts ---\nconst commentCount = commentItems.length;\nconst ideaCount = ideaItems.length;\n\n// --- Actions ---\nconst actions = [];\nif (todayContent.some(item => item.json.status === 'draft')) {\n  actions.push('• Content in draft status afronden en ter review zetten');\n}\nif (todayContent.some(item => item.json.status === 'approved')) {\n  actions.push('• Goedgekeurde content publiceren');\n}\nif (commentCount > 0) {\n  actions.push(`• ${commentCount} comment suggestie${commentCount > 1 ? 's' : ''} reviewen en posten`);\n}\nif (ideaCount > 5) {\n  actions.push(`• Ideeën inbox opschonen (${ideaCount} items)`);\n}\nif (leadItems.length > 0) {\n  const topLead = leadItems[0].json.name || 'Top lead';\n  actions.push(`• Follow-up met ${topLead} (hoogste score)`);\n}\nif (actions.length === 0) {\n  actions.push('• Geen urgente acties — focus op deep work');\n}\n\n// --- Build message ---\nconst message = `☀️ <b>Morning Brief — ${dateStr}</b>\\n\\n📋 <b>Content vandaag:</b>\\n${contentSection}${upcomingSection}\\n\\n🎯 <b>Hot leads (top 5):</b>\\n${leadsSection}\\n\\n💬 <b>Te reviewen:</b>\\n• ${commentCount} comment suggestie${commentCount !== 1 ? 's' : ''} (HN/Reddit)\\n• ${ideaCount} ideeën in inbox\\n\\n⚡ <b>Acties:</b>\\n${actions.join('\\n')}`;\n\nreturn [{ json: { message, contentCount: todayContent.length, leadCount: leadItems.length, commentCount, ideaCount } }];\n"
+      }
+    },
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000009",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        300
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "VNX Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000010",
+      "name": "Log Execution",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "operation": "create",
+        "tableId": "system.executions",
+        "fieldsToSend": {
+          "fieldValues": [
+            {
+              "fieldName": "agent",
+              "fieldValue": "morning_brief"
+            },
+            {
+              "fieldName": "trigger",
+              "fieldValue": "cron"
+            },
+            {
+              "fieldName": "status",
+              "fieldValue": "success"
+            },
+            {
+              "fieldName": "tokens_used",
+              "fieldValue": 0
+            },
+            {
+              "fieldName": "metadata",
+              "fieldValue": "={{ JSON.stringify({ content_count: $json.contentCount, lead_count: $json.leadCount, comment_count: $json.commentCount, idea_count: $json.ideaCount }) }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "2",
+          "name": "VNX Supabase"
+        }
+      }
+    },
+    {
+      "id": "c1d2e3f4-0100-4000-a000-000000000011",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1250,
+        600
+      ],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error_agent",
+              "name": "error_agent",
+              "value": "morning_brief",
+              "type": "string"
+            },
+            {
+              "id": "error_message",
+              "name": "error_message",
+              "value": "={{ $json.error?.message || 'Unknown error in Morning Brief workflow' }}",
+              "type": "string"
+            },
+            {
+              "id": "error_node",
+              "name": "error_node",
+              "value": "={{ $json.execution?.lastNodeExecuted || 'unknown' }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cron 07:00": {
+      "main": [
+        [
+          {
+            "node": "Get Content Stats",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Hot Leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Pending Comments",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Pending Ideas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Content Stats": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Hot Leads": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Pending Comments": {
+      "main": [
+        [
+          {
+            "node": "Merge Results 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Ideas": {
+      "main": [
+        [
+          {
+            "node": "Merge Results 2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Results": {
+      "main": [
+        [
+          {
+            "node": "Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Results 2": {
+      "main": [
+        [
+          {
+            "node": "Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Summary": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Telegram": {
+      "main": [
+        [
+          {
+            "node": "Log Execution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Amsterdam",
+    "saveExecutionProgress": true,
+    "errorWorkflow": "00 — Global Error Handler"
+  },
+  "staticData": {
+    "node:Cron 07:00": {
+      "recurrenceRules": []
+    }
+  },
+  "tags": [],
+  "versionId": "04257166-0bb3-4208-b223-b8d514407f4b"
+}
