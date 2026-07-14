@@ -1,0 +1,15 @@
+# Secrets — never commit the real thing. Only the .example templates are tracked.
+.env
+.env.*
+!.env.example
+credentials.json
+!credentials.json.example
+
+# Node / n8n local
+node_modules/
+.n8n/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
