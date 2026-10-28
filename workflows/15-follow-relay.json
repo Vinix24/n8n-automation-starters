@@ -157,7 +157,7 @@
       "position": [1440, 300],
       "parameters": {
         "method": "POST",
-        "url": "=https://api.apify.com/v2/acts/apify~linkedin-profile-scraper/runs?waitForFinish=120",
+        "url": "=https://api.apify.com/v2/acts/johnvc~linkedin-profile-api/runs?waitForFinish=120",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "credentialType": "httpHeaderAuth",
@@ -170,7 +170,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ startUrls: [{ url: $('Parse Follow URL').first().json.linkedin_url }], proxyConfiguration: { useApifyProxy: true } }) }}",
+        "jsonBody": "={{ JSON.stringify({ profileUrls: [$('Parse Follow URL').first().json.linkedin_url] }) }}",
         "options": {
           "response": {
             "response": {
@@ -222,7 +222,7 @@
       "position": [1920, 300],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const items = $input.all();\nconst inputUrl = $('Parse Follow URL').first().json.linkedin_url;\n\n// Flatten dataset items\nlet dataset = [];\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d)) {\n    dataset = dataset.concat(d);\n  } else if (d && typeof d === 'object' && !d.error) {\n    dataset.push(d);\n  }\n}\n\nif (dataset.length === 0) {\n  return [{ json: {\n    error: true,\n    error_message: 'Apify returned 0 profile items for this URL',\n    linkedin_url: inputUrl,\n    full_name: null,\n    headline: null,\n    avatar_url: null\n  }}];\n}\n\nconst profile = dataset[0];\nconst fullName = profile.name || profile.fullName || profile.firstName + ' ' + profile.lastName || null;\nconst headline = profile.headline || profile.occupation || null;\nconst avatarUrl = profile.photo || profile.profilePicture || profile.photoUrl || null;\n\nreturn [{ json: {\n  error: false,\n  linkedin_url: profile.linkedInUrl || profile.profileUrl || inputUrl,\n  full_name: fullName ? fullName.trim() : null,\n  headline: headline ? headline.trim().slice(0, 300) : null,\n  avatar_url: avatarUrl || null,\n  scraped_at: new Date().toISOString()\n}}];"
+        "jsCode": "const items = $input.all();\nconst inputUrl = $('Parse Follow URL').first().json.linkedin_url;\n\n// Flatten dataset items\nlet dataset = [];\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d)) {\n    dataset = dataset.concat(d);\n  } else if (d && typeof d === 'object' && !d.error && !d.error_message) {\n    dataset.push(d);\n  }\n}\n\nif (dataset.length === 0) {\n  return [{ json: {\n    error: true,\n    error_message: 'Apify returned 0 profile items for this URL',\n    linkedin_url: inputUrl,\n    full_name: null,\n    headline: null,\n    avatar_url: null\n  }}];\n}\n\nconst profile = dataset[0];\nconst fullName = profile.name || profile.fullName || profile.firstName + ' ' + profile.lastName || null;\nconst headline = profile.headline || profile.occupation || null;\nconst avatarUrl = profile.photo || profile.profilePicture || profile.photoUrl || profile.avatar || null;\n\nreturn [{ json: {\n  error: false,\n  linkedin_url: profile.linkedInUrl || profile.profileUrl || inputUrl,\n  full_name: fullName ? fullName.trim() : null,\n  headline: headline ? headline.trim().slice(0, 300) : null,\n  avatar_url: avatarUrl || null,\n  scraped_at: new Date().toISOString()\n}}];"
       }
     },
     {
