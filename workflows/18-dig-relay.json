@@ -296,7 +296,7 @@
       "position": [2640, 300],
       "parameters": {
         "method": "POST",
-        "url": "=https://api.apify.com/v2/acts/apidojo~linkedin-scraper/runs?waitForFinish=120",
+        "url": "=https://api.apify.com/v2/acts/johnvc~linkedin-post-search-api/runs?waitForFinish=120",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "credentialType": "httpHeaderAuth",
@@ -309,7 +309,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ startUrls: [{ url: 'https://www.linkedin.com/search/results/content/?keywords=' + encodeURIComponent($json.topic) + '&datePosted=past-week&sortBy=relevance' }], postsLimit: 10, commentsLimit: 0, includeProfileMetadata: false }) }}",
+        "jsonBody": "={{ JSON.stringify({ keywords: [$json.topic], postedWithin: 'week', maxPostsPerKeyword: 10 }) }}",
         "options": {
           "response": {
             "response": {
@@ -361,7 +361,7 @@
       "position": [3120, 300],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const items = $input.all();\nconst ctx = $('Get Keyword ID').first().json;\n\nlet dataset = [];\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d)) dataset = dataset.concat(d);\n  else if (d && typeof d === 'object' && !d.error) dataset.push(d);\n}\n\nfunction safeInt(val) {\n  const n = parseInt(val, 10);\n  return isNaN(n) ? 0 : n;\n}\n\nconst posts = dataset\n  .filter(p => p && (p.url || p.postUrl || p.linkedinUrl))\n  .map(p => {\n    const eng = p.engagement || {};\n    return {\n      url: (p.url || p.postUrl || p.linkedinUrl || '').split('?')[0],\n      text: (p.text || p.content || p.description || '').slice(0, 120),\n      reactions: safeInt(eng.likes || p.likes),\n      comments: safeInt(eng.comments || p.commentsCount),\n      score: safeInt(eng.likes || p.likes) + safeInt(eng.comments || p.commentsCount) * 2\n    };\n  })\n  .sort((a, b) => b.score - a.score)\n  .slice(0, 5);\n\nreturn [{\n  json: {\n    posts,\n    post_count: posts.length,\n    topic: ctx.topic,\n    keyword_id: ctx.keyword_id,\n    chat_id: ctx.chat_id\n  }\n}];"
+        "jsCode": "const items = $input.all();\nconst ctx = $('Get Keyword ID').first().json;\n\nlet dataset = [];\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d)) dataset = dataset.concat(d);\n  else if (d && typeof d === 'object' && !d.error) dataset.push(d);\n}\n\nfunction safeInt(val) {\n  const n = parseInt(val, 10);\n  return isNaN(n) ? 0 : n;\n}\n\nconst posts = dataset\n  .filter(p => p && (p.url || p.postUrl || p.linkedinUrl))\n  .map(p => {\n    const eng = p.engagement || {};\n    return {\n      url: (p.url || p.postUrl || p.linkedinUrl || '').split('?')[0],\n      text: (p.text || p.content || p.description || '').slice(0, 120),\n      reactions: safeInt(eng.likes || p.likes || p.numLikes),\n      comments: safeInt(eng.comments || p.commentsCount || p.numComments),\n      score: safeInt(eng.likes || p.likes || p.numLikes) + safeInt(eng.comments || p.commentsCount || p.numComments) * 2\n    };\n  })\n  .sort((a, b) => b.score - a.score)\n  .slice(0, 5);\n\nreturn [{\n  json: {\n    posts,\n    post_count: posts.length,\n    topic: ctx.topic,\n    keyword_id: ctx.keyword_id,\n    chat_id: ctx.chat_id\n  }\n}];"
       }
     },
     {
@@ -415,7 +415,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify([{\n  actor: 'apidojo/linkedin-scraper',\n  started_at: new Date().toISOString(),\n  items_returned: $('Parse Top 5 Results').first().json.post_count,\n  cost_estimated_eur: 0.50,\n  state: 'succeeded',\n  trigger: 'dig',\n  correlation_id: $execution.id\n}]) }}",
+        "jsonBody": "={{ JSON.stringify([{\n  actor: 'johnvc/linkedin-post-search-api',\n  started_at: new Date().toISOString(),\n  items_returned: $('Parse Top 5 Results').first().json.post_count,\n  cost_estimated_eur: 0.50,\n  state: 'succeeded',\n  trigger: 'dig',\n  correlation_id: $execution.id\n}]) }}",
         "options": {
           "response": {
             "response": {

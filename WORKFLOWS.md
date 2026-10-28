@@ -6,9 +6,9 @@ Table names below are the ones the workflows actually reference. Some are schema
 
 The Apify actors referenced are public marketplace actors:
 
-- [`apify/linkedin-post-scraper`](https://apify.com/apify/linkedin-post-scraper)
-- [`apify/linkedin-profile-scraper`](https://apify.com/apify/linkedin-profile-scraper)
-- [`apidojo/linkedin-scraper`](https://apify.com/apidojo/linkedin-scraper)
+- [`johnvc/linkedin-posts-api`](https://apify.com/johnvc/linkedin-posts-api)
+- [`johnvc/linkedin-post-search-api`](https://apify.com/johnvc/linkedin-post-search-api)
+- [`johnvc/linkedin-profile-api`](https://apify.com/johnvc/linkedin-profile-api)
 
 Swap them for whichever actor you prefer. Each workflow reads a small, predictable slice of the actor output, documented per workflow below.
 
@@ -54,9 +54,9 @@ Swap them for whichever actor you prefer. Each workflow reads a small, predictab
 
 **Trigger:** webhook, `/track <linkedin-url>`.
 
-**What it does:** scrapes a LinkedIn post and its comments through the Apify post-scraper, then walks the comments to detect your own replies by matching against `OWN_LINKEDIN_URL`. It stores the post in `captured_posts`, the comments in `scraped_comments`, and your own comments in `comment_history`, then confirms in Telegram. It responds to the webhook immediately and does the scrape asynchronously so Telegram does not time out.
+**What it does:** scrapes a LinkedIn post and its visible comments through the Apify posts actor, then walks the comments to detect your own replies by matching against `OWN_LINKEDIN_URL`. It stores the post in `captured_posts`, the comments in `scraped_comments`, and your own comments in `comment_history`, then confirms in Telegram. It responds to the webhook immediately and does the scrape asynchronously so Telegram does not time out.
 
-**Dependencies:** Apify actor `apify/linkedin-post-scraper`.
+**Dependencies:** Apify actor `johnvc/linkedin-posts-api` (`postUrls`).
 
 **Tables:** `captured_posts`, `scraped_comments`, `comment_history`, `system.events`.
 
@@ -68,9 +68,9 @@ Swap them for whichever actor you prefer. Each workflow reads a small, predictab
 
 **Trigger:** webhook, `/follow <linkedin-profile>`.
 
-**What it does:** scrapes a profile through the Apify profile-scraper, adds it to `creator_watchlist`, and replies in Telegram with an inline keyboard so you can label the profile's ICP fit immediately. The label tap is then handled by `13-callback-handler.json`.
+**What it does:** scrapes a profile through the Apify profile actor, adds it to `creator_watchlist`, and replies in Telegram with an inline keyboard so you can label the profile's ICP fit immediately. The label tap is then handled by `13-callback-handler.json`.
 
-**Dependencies:** Apify actor `apify/linkedin-profile-scraper`.
+**Dependencies:** Apify actor `johnvc/linkedin-profile-api` (`profileUrls`).
 
 **Tables:** `creator_watchlist`, `system.events`.
 
@@ -84,7 +84,7 @@ Swap them for whichever actor you prefer. Each workflow reads a small, predictab
 
 **What it does:** scrapes your own recent posts and comments through Apify and writes analytics (impressions, reactions, engagement) to `own_post_analytics`, plus your own comments to `comment_history`. It records the Apify run cost in `apify_usage`.
 
-**Dependencies:** Apify actor `apidojo/linkedin-scraper`. Uses `OWN_LINKEDIN_URL`.
+**Dependencies:** Apify actor `johnvc/linkedin-posts-api` (`profileUrls`). Uses `OWN_LINKEDIN_URL`.
 
 **Tables:** `own_post_analytics`, `comment_history`, `apify_usage`.
 
@@ -122,7 +122,7 @@ Swap them for whichever actor you prefer. Each workflow reads a small, predictab
 
 **What it does:** an on-demand topic scout with a spend guard. Before scraping, it calls the `apify_mtd_spend` RPC to get month-to-date Apify spend and checks it against a monthly cap; if you are over budget it refuses and tells you in Telegram. Otherwise it runs the scrape, records the cost in `apify_usage`, and returns the top five results.
 
-**Dependencies:** Apify actor `apidojo/linkedin-scraper`. Postgres RPC `apify_mtd_spend` (returns month-to-date spend).
+**Dependencies:** Apify actor `johnvc/linkedin-post-search-api` (`keywords`). Postgres RPC `apify_mtd_spend` (returns month-to-date spend).
 
 **Tables:** `apify_usage`, `monitoring_keywords`, `system.events`. RPC: `apify_mtd_spend`.
 

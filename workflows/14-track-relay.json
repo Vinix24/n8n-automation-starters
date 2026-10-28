@@ -135,7 +135,7 @@
       "position": [1200, 300],
       "parameters": {
         "method": "POST",
-        "url": "=https://api.apify.com/v2/acts/apify~linkedin-post-scraper/runs?waitForFinish=120",
+        "url": "=https://api.apify.com/v2/acts/johnvc~linkedin-posts-api/runs?waitForFinish=120",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "credentialType": "httpHeaderAuth",
@@ -148,7 +148,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ startUrls: [{ url: $json.linkedin_url }], maxComments: 200, proxyConfiguration: { useApifyProxy: true } }) }}",
+        "jsonBody": "={{ JSON.stringify({ postUrls: [$json.linkedin_url] }) }}",
         "options": {
           "response": {
             "response": {
@@ -200,7 +200,7 @@
       "position": [1680, 300],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const items = $input.all();\nconst ownUrl = ($env.OWN_LINKEDIN_URL || '').toLowerCase().replace(/\\/$/, '');\nconst ownSlug = ownUrl.split('/in/')[1] || '';\n\n// Flatten dataset items (Apify returns array of arrays or flat array)\nlet dataset = [];\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d)) {\n    dataset = dataset.concat(d);\n  } else if (d && typeof d === 'object') {\n    dataset.push(d);\n  }\n}\n\nif (dataset.length === 0) {\n  return [{ json: {\n    error: true,\n    error_message: 'Apify returned 0 items for this URL',\n    post: null,\n    own_comments: [],\n    other_comments: [],\n    comment_count: 0,\n    own_comment_found: false\n  }}];\n}\n\nconst postData = dataset[0];\nconst allComments = postData.comments || [];\n\nconst ownComments = [];\nconst otherComments = [];\n\nfor (const c of allComments) {\n  const authorUrl = (c.author?.url || c.commenterProfileUrl || '').toLowerCase().replace(/\\/$/, '');\n  if (authorUrl && ownUrl && (authorUrl === ownUrl || (ownSlug && authorUrl.includes(ownSlug)))) {\n    ownComments.push(c);\n  } else {\n    otherComments.push(c);\n  }\n}\n\nreturn [{ json: {\n  error: false,\n  post_url: postData.url || postData.postUrl || '',\n  post_text: postData.text || postData.content || '',\n  author_name: postData.author?.name || postData.authorName || '',\n  author_url: postData.author?.url || postData.authorProfileUrl || '',\n  author_headline: postData.author?.headline || '',\n  likes: postData.likesCount || postData.likes || 0,\n  comment_count: allComments.length,\n  own_comments: ownComments,\n  other_comments: otherComments,\n  own_comment_found: ownComments.length > 0,\n  scraped_at: new Date().toISOString()\n}}];"
+        "jsCode": "const items = $input.all();\nconst ownUrl = ($env.OWN_LINKEDIN_URL || '').toLowerCase().replace(/\\/$/, '');\nconst ownSlug = ownUrl.split('/in/')[1] || '';\n\n// Flatten dataset items (Apify returns array of arrays or flat array)\nlet dataset = [];\nfor (const item of items) {\n  const d = item.json;\n  if (Array.isArray(d)) {\n    dataset = dataset.concat(d);\n  } else if (d && typeof d === 'object' && !d.error_message) {\n    dataset.push(d);\n  }\n}\n\nif (dataset.length === 0) {\n  return [{ json: {\n    error: true,\n    error_message: 'Apify returned 0 items for this URL',\n    post: null,\n    own_comments: [],\n    other_comments: [],\n    comment_count: 0,\n    own_comment_found: false\n  }}];\n}\n\nconst postData = dataset[0];\nconst allComments = postData.comments || postData.topComments || [];\n\nconst ownComments = [];\nconst otherComments = [];\n\nfor (const c of allComments) {\n  const authorUrl = (c.author?.url || c.commenterProfileUrl || c.use_url || '').toLowerCase().replace(/\\/$/, '');\n  if (authorUrl && ownUrl && (authorUrl === ownUrl || (ownSlug && authorUrl.includes(ownSlug)))) {\n    ownComments.push(c);\n  } else {\n    otherComments.push(c);\n  }\n}\n\nreturn [{ json: {\n  error: false,\n  post_url: postData.url || postData.postUrl || '',\n  post_text: postData.text || postData.content || '',\n  author_name: postData.author?.name || postData.authorName || '',\n  author_url: postData.author?.url || postData.authorProfileUrl || postData.authorUrl || '',\n  author_headline: postData.author?.headline || postData.authorHeadline || '',\n  likes: postData.likesCount || postData.likes || postData.numLikes || 0,\n  comment_count: allComments.length,\n  own_comments: ownComments,\n  other_comments: otherComments,\n  own_comment_found: ownComments.length > 0,\n  scraped_at: new Date().toISOString()\n}}];"
       }
     },
     {
@@ -242,7 +242,7 @@
       "position": [2160, 300],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Build comment_history rows for your own comments found under the post\nconst processed = $('Process Scrape Output').first().json;\nconst ownComments = processed.own_comments || [];\n\nif (ownComments.length === 0) {\n  return [{ json: { own_comments_inserted: 0, skip_reason: 'no_own_comments_found' } }];\n}\n\nconst rows = ownComments.map(c => ({\n  comment_url: c.url || c.commentUrl || `${processed.post_url}#comment-${c.id || Math.random()}`,\n  post_url: processed.post_url,\n  commenter_name: c.author?.name || null,\n  commenter_url: c.author?.url || ($env.OWN_LINKEDIN_URL || ''),\n  commenter_headline: c.author?.headline || '',\n  comment_text: c.text || c.content || '',\n  comment_date: c.createdAt || c.date || new Date().toISOString(),\n  likes: c.likesCount || c.likes || 0,\n  is_reply: c.isReply || false,\n  source: 'mobile-track',\n  created_by: 'telegram-track-relay',\n  version: 1\n}));\n\n// POST to Supabase\nreturn [{ json: { comment_history_rows: rows, own_comments_inserted: rows.length } }];"
+        "jsCode": "// Build comment_history rows for your own comments found under the post\nconst processed = $('Process Scrape Output').first().json;\nconst ownComments = processed.own_comments || [];\n\nif (ownComments.length === 0) {\n  return [{ json: { own_comments_inserted: 0, skip_reason: 'no_own_comments_found' } }];\n}\n\nconst rows = ownComments.map(c => ({\n  comment_url: c.url || c.commentUrl || `${processed.post_url}#comment-${c.id || Math.random()}`,\n  post_url: processed.post_url,\n  commenter_name: c.author?.name || c.user_name || null,\n  commenter_url: c.author?.url || c.use_url || ($env.OWN_LINKEDIN_URL || ''),\n  commenter_headline: c.author?.headline || '',\n  comment_text: c.text || c.content || c.comment || '',\n  comment_date: c.createdAt || c.date || c.comment_date || new Date().toISOString(),\n  likes: c.likesCount || c.likes || c.num_reactions || 0,\n  is_reply: c.isReply || false,\n  source: 'mobile-track',\n  created_by: 'telegram-track-relay',\n  version: 1\n}));\n\n// POST to Supabase\nreturn [{ json: { comment_history_rows: rows, own_comments_inserted: rows.length } }];"
       }
     },
     {
@@ -296,7 +296,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify(($('Process Scrape Output').first().json.other_comments || []).map(c => ({ post_url: $('Process Scrape Output').first().json.post_url, commenter_name: c.author?.name || '', commenter_url: c.author?.url || '', commenter_headline: c.author?.headline || '', comment_text: c.text || c.content || '', likes: c.likesCount || c.likes || 0, is_reply: c.isReply || false }))) }}",
+        "jsonBody": "={{ JSON.stringify(($('Process Scrape Output').first().json.other_comments || []).map(c => ({ post_url: $('Process Scrape Output').first().json.post_url, commenter_name: c.author?.name || c.user_name || '', commenter_url: c.author?.url || c.use_url || '', commenter_headline: c.author?.headline || '', comment_text: c.text || c.content || c.comment || '', likes: c.likesCount || c.likes || c.num_reactions || 0, is_reply: c.isReply || false }))) }}",
         "options": {
           "response": {
             "response": {
@@ -421,7 +421,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify(($('Process Scrape Output').first().json.other_comments || []).concat($('Process Scrape Output').first().json.own_comments || []).map(c => ({ post_url: $('Process Scrape Output').first().json.post_url, commenter_name: c.author?.name || '', commenter_url: c.author?.url || '', commenter_headline: c.author?.headline || '', comment_text: c.text || c.content || '', likes: c.likesCount || c.likes || 0, is_reply: c.isReply || false }))) }}",
+        "jsonBody": "={{ JSON.stringify(($('Process Scrape Output').first().json.other_comments || []).concat($('Process Scrape Output').first().json.own_comments || []).map(c => ({ post_url: $('Process Scrape Output').first().json.post_url, commenter_name: c.author?.name || c.user_name || '', commenter_url: c.author?.url || c.use_url || '', commenter_headline: c.author?.headline || '', comment_text: c.text || c.content || c.comment || '', likes: c.likesCount || c.likes || c.num_reactions || 0, is_reply: c.isReply || false }))) }}",
         "options": {
           "response": {
             "response": {
